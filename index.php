@@ -99,6 +99,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         /* small responsive tweaks */
         @media (min-width: 1024px) { .container-grid { grid-template-columns: 1fr 460px; } }
+
+        .qr-box { width: 220px; height: 220px; display:flex; align-items:center; justify-content:center; border-radius:8px; background:linear-gradient(180deg,#ffffff,#f8fafc); padding:12px; }
     </style>
 </head>
 <body class="page-bg flex items-center justify-center">
@@ -148,6 +150,47 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             </div>
         </div>
 
+        <!-- PAYMENT SECTION -->
+        <div class="mt-6 p-4 bg-gradient-to-r from-white to-yellow-50 rounded-lg border border-yellow-100">
+            <div class="flex items-center justify-between">
+                <h4 class="text-md font-semibold text-gray-800">Pay Application Fee</h4>
+                <div class="text-sm text-gray-500">Secure UPI payment</div>
+            </div>
+
+            <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div class="md:col-span-2">
+                    <label class="text-sm text-gray-600">Enter UPI ID</label>
+                    <input id="upiId" type="text" placeholder="example@upi or your@bank" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus-ring" />
+                    <div id="upiError" class="error-message"></div>
+                </div>
+
+                <div>
+                    <label class="text-sm text-gray-600">Amount (INR)</label>
+                    <input id="amount" type="number" min="1" placeholder="100" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus-ring" />
+                </div>
+
+                <div class="md:col-span-3 flex gap-2 mt-2">
+                    <button id="generateQrBtn" class="py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Generate QR Code</button>
+                    <button id="resetQrBtn" class="py-2 px-4 border rounded-lg">Reset</button>
+                </div>
+            </div>
+
+            <div class="mt-4 flex flex-col md:flex-row gap-4 items-center">
+                <div class="qr-box" id="qrContainer">
+                    <img id="qrImage" src="" alt="QR will appear here" style="display:block; max-width:100%; max-height:100%;" />
+                </div>
+
+                <div class="flex flex-col gap-2">
+                    <div class="text-sm text-gray-600">Scan to pay with any UPI app</div>
+                    <div class="flex gap-2">
+                        <a id="downloadQrLink" href="#" download class="py-2 px-4 border rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50">Download QR</a>
+                        <a id="openUpiLink" href="#" class="py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Open UPI App</a>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1">Tip: check UPI ID carefully before sharing.</div>
+                </div>
+            </div>
+        </div>
+
         <div class="mt-6 flex flex-col md:flex-row gap-3 justify-center">
              <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="inline-block py-2 px-6 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition duration-150">New Application</a>
              <a href="#" onclick="window.print();" class="inline-block py-2 px-6 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition duration-150">Print / Save</a>
@@ -190,6 +233,62 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a'); a.href = url; a.download = payload.applicationNumber + '.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        });
+
+        // PAYMENT: generate UPI qr
+        function isValidUpi(upi) {
+            // basic validation: contains @ and reasonable length
+            return typeof upi === 'string' && upi.indexOf('@') !== -1 && upi.length >= 3 && upi.length <= 64;
+        }
+
+        document.getElementById('generateQrBtn').addEventListener('click', function(e){
+            const upi = document.getElementById('upiId').value.trim();
+            const amount = document.getElementById('amount').value.trim();
+            const upiErrorEl = document.getElementById('upiError');
+            upiErrorEl.textContent = '';
+
+            if (!isValidUpi(upi)) {
+                upiErrorEl.textContent = 'Please enter a valid UPI ID (e.g., example@upi).';
+                return;
+            }
+
+            // Build UPI deep link per NPCI standard (pa, pn, am, tn)
+            const pa = encodeURIComponent(upi);
+            const pn = encodeURIComponent('Sapthagiri');
+            const tn = encodeURIComponent('Application Fee for ' + document.getElementById('appNumberDisplay').innerText);
+            const am = amount ? encodeURIComponent(amount) : '';
+            let upiUri = `upi://pay?pa=${pa}&pn=${pn}&tn=${tn}`;
+            if (am) upiUri += `&am=${am}`;
+
+            // Use a public QR generator (qrserver) to get an image
+            const qrSize = 300;
+            const qrSrc = 'https://api.qrserver.com/v1/create-qr-code/?size=' + qrSize + 'x' + qrSize + '&data=' + encodeURIComponent(upiUri);
+
+            const qrImage = document.getElementById('qrImage');
+            qrImage.src = qrSrc;
+            qrImage.alt = 'UPI QR for ' + upi;
+
+            const downloadLink = document.getElementById('downloadQrLink');
+            downloadLink.href = qrSrc;
+            downloadLink.download = (document.getElementById('appNumberDisplay').innerText || 'payment') + '.png';
+
+            const openUpi = document.getElementById('openUpiLink');
+            openUpi.href = upiUri;
+            openUpi.setAttribute('data-upi', upiUri);
+            openUpi.onclick = function(ev){
+                // try to open UPI app via intent; on desktop it may do nothing but on mobile it may open UPI app
+                window.location.href = upiUri;
+                ev.preventDefault();
+            };
+        });
+
+        document.getElementById('resetQrBtn').addEventListener('click', function(){
+            document.getElementById('upiId').value = '';
+            document.getElementById('amount').value = '';
+            document.getElementById('qrImage').src = '';
+            document.getElementById('downloadQrLink').href = '#';
+            document.getElementById('openUpiLink').href = '#';
+            document.getElementById('upiError').textContent = '';
         });
     </script>
 
